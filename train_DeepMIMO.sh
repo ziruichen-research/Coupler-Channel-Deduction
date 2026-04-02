@@ -1,54 +1,29 @@
 python main.py --conf=./conf/train.yaml \
---gpu=3 \
+--gpu=0 \
 --mod \
-input_ant_size=2 \
-input_car_size=2 \
+input_ant_size=3 \
+input_car_size=3 \
 num_cur_range_train=[0,1] \
 max_samples=2000 \
-batch_size=500 \
-micro_batch=500 \
+batch_size=100 \
+micro_batch=100 \
 learning_rate=0.001 \
 lr_scheduler.type=TransformerWarmupScheduler \
 lr_scheduler.update_mode=step \
-lr_scheduler_list.TransformerWarmupScheduler.d_model=1024 \
+lr_scheduler_list.TransformerWarmupScheduler.d_model=512 \
 lr_scheduler_list.TransformerWarmupScheduler.warmup_steps=4000 \
-scheme=rcdnet \
-rcdnet.hidden_size=1024 \
-exp_dir=./exp/my_train/input_2antx2car/data2000_Ncur0or1/RCDNet-d1024_batch500
-
-
-#scheme=coupler \
+scheme=afcoupler \
+exp_dir=./exp/DeepMIMO-tmp/input_3antx3car/data2000/AFCoupler
 
 #scheme=conv_coupler \
 #conv_coupler.d_model=128 \
 #conv_coupler.depth_pred=8 \
-
-#scheme=acoupler_flat \
-#acoupler.d_model=128 \
-#acoupler.num_heads=1 \
-#acoupler.heads_aggregate=False \
-#acoupler.dropout=0 \
-
-#scheme=acoupler_flat_v2 \
-#acoupler_flat_v2.d_model=128 \
-#acoupler_flat_v2.num_heads=1 \
-#acoupler_flat_v2.dropout=0 \
-
-#scheme=acoupler_standard \
-#acoupler_standard.d_model=2048 \
-#acoupler_standard.num_heads=8 \
-#acoupler_standard.dim_feedforward=512 \
-#acoupler_standard.dropout=0 \
-#acoupler_standard.has_proj=True \
 
 #scheme=acoupler \
 #acoupler.d_model=128 \
 #acoupler.num_heads=1 \
 #acoupler.heads_aggregate=False \
 #acoupler.dropout=0 \
-
-#scheme=acouplerV2 \
-#acouplerV2.num_heads=4 \
 
 #scheme=afcoupler \
 #afcoupler.d_model=128 \
@@ -62,8 +37,6 @@ exp_dir=./exp/my_train/input_2antx2car/data2000_Ncur0or1/RCDNet-d1024_batch500
 #rcdnet.hidden_size=512 \
 #batch_size=500 \
 #micro_batch=500 \
-
-#scheme=afcdnet \
 
 #scheme=convlstm \
 #convlstm.hidden_dim=16 \

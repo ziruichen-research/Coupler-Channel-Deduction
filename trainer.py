@@ -17,32 +17,26 @@ from calflops import calculate_flops
 
 from base_trainer import BaseTrainer
 from utils.dataset import DeepmimoO1Dataset, DICHASUSDataset
-from utils.metrics import mse_weighted_by_ant_snr, Nmse, Nmse_ant_snr_weighted  # 引入新的向量化指标
+from utils.metrics import mse_weighted_by_ant_snr, Nmse, Nmse_ant_snr_weighted
 from utils.lr_scheduler import TransformerWarmupScheduler
 
 
 class Trainer(BaseTrainer):
+    """Training workflow with gradient accumulation, validation, and checkpointing."""
+
     def __init__(self, conf, device, rank, world_size, distributed):
-        # 1. 动态加载模型架构参数
         scheme = conf['scheme']
         conf['model'] = conf[scheme]
 
-        # 2. 初始化 BaseTrainer (构建模型 & DDP)
         super().__init__(conf, device, rank, world_size, distributed)
         self.const_h = self.conf.get('const_h', 10000.0)
-        # self.criterion = nn.MSELoss()
 
-        # 3. 初始化优化器
         lr = self.conf['learning_rate']
         self.optimizer = optim.Adam(self.model.parameters(), lr=lr)
 
-        # ================= [新增] 梯度累积计算 =================
-        # 逻辑 batch (Target)
         self.target_batch = self.conf['batch_size']
-        # 物理 batch (Actual GPU Load)，如果没写默认等于 target_batch
         self.micro_batch = self.conf.get('micro_batch', self.target_batch)
 
-        # 计算累积步数
         if self.target_batch % self.micro_batch != 0:
             raise ValueError(f"batch_size ({self.target_batch}) must be divisible by small_batch ({self.micro_batch})")
 
@@ -52,34 +46,23 @@ class Trainer(BaseTrainer):
             print(f"Gradient Accumulation Enabled: Target Batch={self.target_batch}, "
                   f"Micro Batch={self.micro_batch}, Accum Steps={self.grad_accum_steps}")
 
-        # 4. 初始化调度器
         self.scheduler, self.scheduler_mode = self._get_scheduler()
 
-        # 5. 状态变量
         self.global_step = 0
         self.start_epoch = 1
 
-        # ================= [修改点 1] 预加载验证集 Loader =================
-        # 在初始化时就加载好，避免训练过程中反复读取硬盘/内存分配
         if self.rank == 0:
             print("Initializing Validation Loaders...")
-        # 1. 初始化 训练集 Loader 和 Sampler (保存为成员变量)
         self.train_loader, self.train_sampler = self._get_train_dataloader()
-        # 2. 初始化 验证集 Loaders
         self.val_loaders = self._init_val_loaders()
-        # =================================================================
 
-        # 6. 自动处理权重加载 (断点续训 或 加载预训练)
         self._setup_training_state()
 
-        # 预计算常量 (系统参数从 conf 根节点读)
         self.step_ant = self.conf['num_ant'] // self.conf['input_ant_size']
         self.step_car = self.conf['num_car'] // self.conf['input_car_size']
-        # self.d_model = self.conf['model']['d_model']  # 这个是模型参数，从model里读
 
-        # =================  CSV 初始化与复杂度计算 =================
+        # Rank 0 owns logging and complexity bookkeeping.
         if self.rank == 0:
-            # 1. 初始化 CSV 路径
             self.log_dir = os.path.join(self.exp_dir, 'log')
             os.makedirs(self.log_dir, exist_ok=True)
 
@@ -91,7 +74,6 @@ class Trainer(BaseTrainer):
             self.val_csv_path = os.path.join(self.log_dir, 'val_metrics.csv')
             self.complexity_csv_path = os.path.join(self.log_dir, 'model_complexity.csv')
 
-            # 2. 如果文件不存在，写入表头
             if not os.path.exists(self.train_csv_path):
                 with open(self.train_csv_path, 'w', newline='') as f:
                     csv.writer(f).writerow(['global_step', 'epoch', 'loss', 'lr'])
@@ -100,20 +82,18 @@ class Trainer(BaseTrainer):
                 with open(self.val_csv_path, 'w', newline='') as f:
                     csv.writer(f).writerow(['epoch', 'mode', 'nmse', 'nmse_ant_snr_weighted'])
 
-            # 3. 计算模型复杂度 (仅在从头训练或第一次运行时计算，避免resume时重复计算，或者每次启动都算一次也可以)
-            # 这里我们选择每次启动都算一次并追加/覆盖记录
+            # Keep one complexity snapshot per launch.
             self._calculate_and_log_complexity()
 
     def train(self):
-        """ 主训练循环 """
-        # loader, sampler = self._get_train_dataloader()
+        """Run the full training loop."""
         for epoch in range(self.start_epoch, self.conf['num_epochs'] + 1):
             if self.distributed and self.train_sampler is not None:
                 self.train_sampler.set_epoch(epoch)
 
             self.train_one_epoch(epoch, self.train_loader)
 
-            # Epoch 级调度更新
+            # Epoch-based scheduler updates once per epoch.
             if self.scheduler_mode == 'epoch':
                 self.scheduler.step()
 
@@ -123,23 +103,23 @@ class Trainer(BaseTrainer):
             if epoch % self.conf['test_epoch_inter'] == 0:
                 self.validate(epoch)
 
-        # 训练结束保存最终模型
+        # Export the final model in exp_dir/model.pth.
         self.save_checkpoint(self.conf['num_epochs']-1, is_final=True)
 
     def train_one_epoch(self, epoch, loader):
-        """ 执行一个 Epoch 的训练 """
+        """Run one training epoch."""
         self.model.train()
 
-        # 仅主进程显示进度条
+        # Show tqdm only on rank 0 to avoid duplicated logs.
         iterator = tqdm(loader, desc=f"Epoch {epoch}") if self.rank == 0 else loader
 
-        # [新增] 在 Epoch 开始前清零梯度，防止上个 Epoch 残留
+        # Reset grads once at epoch start for accumulation mode.
         self.optimizer.zero_grad()
 
         for i, input_batch in enumerate(iterator):
             loss_val = self.train_step(input_batch, batch_idx=i)
 
-            # 日志记录
+            # Log using optimizer-step index (global_step).
             if self.rank == 0:
                 if isinstance(iterator, tqdm):
                     iterator.set_postfix({'loss': f"{loss_val:.2e}"})
@@ -148,9 +128,7 @@ class Trainer(BaseTrainer):
 
 
     def train_step(self, input_batch, batch_idx):
-        """ 执行单步训练：前向 -> 计算Loss -> 反向 -> 更新参数 """
-        # self.global_step += 1
-        # self.optimizer.zero_grad()
+        """Run one micro step: forward, loss, backward, and optional optimizer step."""
         if isinstance(input_batch, torch.Tensor):
             csi_data = input_batch
             snr_data = None
@@ -158,12 +136,11 @@ class Trainer(BaseTrainer):
             csi_data = input_batch['csi']
             snr_data = input_batch['snr']   # [batch, K, ant]
 
-        # 数据准备
+        # Prepare target/current/past tensors and optional SNR slices.
         prepared_data = self.prepare_data(csi_data, snr_data=snr_data)
         h_now, h_now_input, h_past_input = prepared_data['h_now'], prepared_data['h_now_input'], prepared_data['h_past_input']
         snr_now, snr_past = prepared_data['snr_now'], prepared_data['snr_past']
 
-        # 前向
         h_now_output = self.model(h_now_input, h_past_input)
 
         loss_type = self.conf.get('loss_type', 'mse')
@@ -177,26 +154,24 @@ class Trainer(BaseTrainer):
         else:
             raise ValueError(f"Invalid loss type: {loss_type}")
 
-        # [梯度累积逻辑] Loss 缩放：因为梯度是累加的(Add)，为了求平均，需要除以累积步数
+        # Scale loss so accumulated gradients match large-batch average.
         loss = loss / self.grad_accum_steps
 
-        # 反向
         loss.backward()
 
-        # 3. 只有当累积满规定步数时，才执行 Optimizer Step
+        # Apply optimizer/scheduler only when one logical batch is complete.
         if (batch_idx + 1) % self.grad_accum_steps == 0:
             self.optimizer.step()
-            self.optimizer.zero_grad()  # 更新完参数后，清空梯度
-            self.global_step += 1  # 更新全局步数 (按照“大 Batch”计数)
+            self.optimizer.zero_grad()
+            self.global_step += 1
 
-            # Step 级调度更新 (也应该随着 Optimizer Step 进行)
             if self.scheduler_mode == 'step':
                 self.scheduler.step()
-        # ========================================================
 
         return loss.item() * self.grad_accum_steps
 
     def prepare_data(self, csi_data, snr_data=None):
+        """Randomly sample current/past frames and build model inputs."""
         csi_data = csi_data.to(self.device).float() * self.const_h
 
         seq_len = csi_data.shape[1]
@@ -207,9 +182,8 @@ class Trainer(BaseTrainer):
         idx_now = indices[-1]
         idx_past = indices[:-1]
 
-        # Data Augmentation (Pad Past)
-        #TODO: 实测数据为[0,0]，完全mobile
-        num_cur_range = self.conf.get('num_cur_range_train', (0, 1))   # 默认(0, 4)
+        # Optional augmentation: duplicate current frame into history.
+        num_cur_range = self.conf.get('num_cur_range_train', (0, 1))  # For purely mobile traces this is often [0, 0].
         for _ in range(random.randint(num_cur_range[0], num_cur_range[1])): idx_past.append(idx_now)
         random.shuffle(idx_past)
 
@@ -218,7 +192,7 @@ class Trainer(BaseTrainer):
                             0:self.step_car * (self.conf['input_car_size'] - 1) + 1:self.step_car, :]
         h_past_input = csi_data[:, idx_past, ...]
 
-        # snr 也进行相应排序
+        # Keep SNR slices aligned with selected frame indices.
         snr_now, snr_past = None, None
         if snr_data is not None:
             snr_data = snr_data.to(self.device).float()
@@ -227,7 +201,7 @@ class Trainer(BaseTrainer):
 
         train_snrdb_range = self.conf.get('train_snrdb_range', None)
         if train_snrdb_range is not None and h_past_input.shape[1] > 0:
-            # 获取维度信息: [Batch, Seq_Len, Ant, Car, Complex(2)]
+            # Add Gaussian noise to past input with random SNR in dB range.
             B, L, *rest = h_past_input.shape
             snr_db = torch.empty((B, L, 1, 1, 1), device=h_past_input.device).uniform_(
                 train_snrdb_range[0], train_snrdb_range[1]
@@ -246,31 +220,37 @@ class Trainer(BaseTrainer):
             'snr_now': snr_now,
             'snr_past': snr_past,
         }
-        # return h_now, h_now_input, h_past_input
 
     def log_metrics(self, loss, epoch):
-        """ 记录日志到 TensorBoard 和 进度条 """
+        """Write training metrics to TensorBoard and CSV."""
         current_lr = self.optimizer.param_groups[0]['lr']
         if self.writer:
             self.writer.add_scalar('Train/Loss', loss, self.global_step)
             self.writer.add_scalar('Train/LR', current_lr, self.global_step)
 
-        # [新增] 写入 CSV
         with open(self.train_csv_path, 'a', newline='') as f:
             writer = csv.writer(f)
-            # global_step, epoch, loss, lr
             writer.writerow([self.global_step, epoch, loss, current_lr])
 
     def validate(self, epoch):
-        """ 训练过程中的多数据集验证 """
-        self.model.eval()
+        """Run validation across all preloaded validation modes."""
+        # Keep ranks synchronized around validation to prevent DDP stragglers.
+        if self.distributed:
+            torch.distributed.barrier()
 
-        total_nmse = 0
-        total_nmse_ant_weighted = 0
-        count = 0
+        # Run validation only on rank 0 to avoid duplicated compute in DDP.
+        if self.distributed and self.rank != 0:
+            torch.distributed.barrier()
+            return
+
+        self.model.eval()
 
         with torch.no_grad():
             for val_data_mode, val_loader in self.val_loaders.items():
+                total_nmse = 0.0
+                total_nmse_ant_weighted = 0.0
+                count = 0
+
                 for data_batch in tqdm(val_loader, desc=f"Val-{val_data_mode}"):
                     data_batch: Union[torch.Tensor, Dict[str, torch.Tensor]]
                     if isinstance(data_batch, torch.Tensor):
@@ -280,7 +260,7 @@ class Trainer(BaseTrainer):
                         csi_data = data_batch['csi']
                         snr_data = data_batch['snr']  # [batch, K, ant]
 
-                    # 简单验证逻辑：取全序列
+                    # Validation uses full history and last frame as target.
                     csi_data = csi_data.to(self.device).float() * self.const_h
                     index = list(range(csi_data.shape[1]))
                     index_now = index[-1]
@@ -297,13 +277,12 @@ class Trainer(BaseTrainer):
 
                     h_out = self.model(h_now_input, h_past_input)
 
-                    # 计算 Batch 平均 NMSE
+                    # Aggregate batch metrics.
                     h_out, h_now = h_out.cpu().numpy(), h_now.cpu().numpy()
                     batch_nmse = np.mean(Nmse(h_out, h_now))
                     total_nmse += batch_nmse
-                    # 计算 Batch 带天线 SNR 加权的平均 NMSE
                     if snr_now is None:
-                        batch_nmse_ant_weighted = -1   # -1 表示无效记录
+                        batch_nmse_ant_weighted = -1
                     else:
                         snr_now = snr_now.cpu().numpy()
                         batch_nmse_ant_weighted = np.mean(
@@ -320,23 +299,26 @@ class Trainer(BaseTrainer):
                     if self.writer:
                         self.writer.add_scalar(f'Val-{val_data_mode}/NMSE', avg_nmse, epoch)
                         self.writer.add_scalar(f'Val-{val_data_mode}/NMSE-snrW', avg_nmse_snrW, epoch)
-                    # 写入 CSV
                     with open(self.val_csv_path, 'a', newline='') as f:
                         writer = csv.writer(f)
-                        # epoch, mode, nmse, nmse_snrW
                         writer.writerow([epoch, val_data_mode, avg_nmse, avg_nmse_snrW])
 
+        if self.distributed:
+            torch.distributed.barrier()
+
     def _get_train_dataloader(self):
-        # 支持多场景数据混合 (data_dirs 是列表)
+        """Build training loader, supporting multi-directory dataset concatenation."""
         data_dirs = self.conf['data_dirs']
         dataset_type = self.conf.get('dataset_type', 'DeepmimoO1')
         max_samples = self.conf.get('max_samples', None)
         datasets = []
         for d_dir in data_dirs:
             if dataset_type == 'DeepmimoO1':
-                ds = DeepmimoO1Dataset(d_dir, mode='train', max_samples=max_samples)   # 训练集默认子文件夹为 'train'
+                ds = DeepmimoO1Dataset(d_dir, mode='train', max_samples=max_samples)
             elif dataset_type == 'DICHASUS':
-                ds = DICHASUSDataset(d_dir, dataset_name=self.conf['train_dataset_name'],
+                dichasus_conf = self.conf.get('dichasus', {})
+                trainset_name = dichasus_conf.get('train_dataset_name', self.conf.get('train_dataset_name'))
+                ds = DICHASUSDataset(d_dir, dataset_name=trainset_name,
                                      max_samples=max_samples, load_to_memory=True)
             else:
                 raise ValueError(f"Unsupported dataset type: {dataset_type}")
@@ -346,7 +328,6 @@ class Trainer(BaseTrainer):
         if len(datasets) == 0:
             raise ValueError("No valid training data found in config data_dirs!")
 
-        # 合并所有数据集
         full_dataset = ConcatDataset(datasets)
 
         if self.distributed:
@@ -368,31 +349,30 @@ class Trainer(BaseTrainer):
         return loader, sampler
 
     def _get_val_dataloader(self, mode: Optional[str]='specifictest_mobile'):
-        # 获取一个用于验证的 loader
+        """Build one validation loader for a given mode."""
         d_dir = self.conf['data_dirs'][0]
         dataset_type = self.conf.get('dataset_type', 'DeepmimoO1')
         if dataset_type == 'DeepmimoO1':
             assert mode is not None, "Please specify mode for DeepmimoO1 validation!"
-            ds = DeepmimoO1Dataset(d_dir, mode=mode)  # 默认验证集
+            ds = DeepmimoO1Dataset(d_dir, mode=mode)
         elif dataset_type == 'DICHASUS':
-            ds = DICHASUSDataset(d_dir, dataset_name=self.conf['test_dataset_name'], load_to_memory=True)
+            dichasus_conf = self.conf.get('dichasus', {})
+            testset_name = dichasus_conf.get('test_dataset_name', self.conf.get('test_dataset_name'))
+            ds = DICHASUSDataset(d_dir, dataset_name=testset_name, load_to_memory=True)
         else:
             raise ValueError(f"Unsupported dataset type: {dataset_type}")
 
         loader = DataLoader(ds, batch_size=self.micro_batch, shuffle=False, num_workers=self.conf['num_workers'])
         return loader
 
-    # ================= [修改点 2] 新增初始化验证集的方法 =================
     def _init_val_loaders(self):
-        """ 集中初始化验证集 DataLoader """
+        """Initialize all validation loaders once at startup."""
         dataset_type = self.conf.get('dataset_type', 'DeepmimoO1')
         loaders = {}
         if dataset_type == 'DeepmimoO1':
-            # 分别加载 static 和 mobile
             loaders['static'] = self._get_val_dataloader(mode='specifictest_static')
             loaders['mobile'] = self._get_val_dataloader(mode='specifictest_mobile')
         elif dataset_type == 'DICHASUS':
-            # 加载单一测试集
             loaders['test'] = self._get_val_dataloader(mode=None)
         else:
             raise ValueError(f"Unsupported dataset type: {dataset_type}")
@@ -400,7 +380,7 @@ class Trainer(BaseTrainer):
         return loaders
 
     def _get_scheduler(self):
-        # 支持从配置中读取调度器参数
+        """Create the learning-rate scheduler from config."""
         scheduler_conf = self.conf['lr_scheduler']
         scheduler_list = self.conf['lr_scheduler_list']
         stype = scheduler_conf['type']
@@ -420,16 +400,15 @@ class Trainer(BaseTrainer):
         elif stype == 'CosineAnnealingLR':
             scheduler = CosineAnnealingLR(self.optimizer, **params)
         else:
-            # 默认 fallback
             scheduler = StepLR(self.optimizer, step_size=99999999, gamma=1.0)
 
         return scheduler, mode
 
     def _setup_training_state(self):
         """
-        初始化训练状态：优先加载最新的断点，否则加载配置文件指定的权重
+        Initialize training state: resume from latest checkpoint if available,
+        otherwise load pretrained weights if provided.
         """
-        # 1. 尝试寻找 ckpts 目录下的最新断点
         ckpt_dir = os.path.join(self.exp_dir, 'ckpts')
         resume_path = None
         if os.path.exists(ckpt_dir):
@@ -437,20 +416,17 @@ class Trainer(BaseTrainer):
             if ckpts:
                 resume_path = max(ckpts, key=os.path.getctime)
 
-        # 2. 执行加载逻辑
         if resume_path:
             if self.rank == 0: print(f"Resuming training from: {resume_path}")
             self.load_checkpoint(resume_path)
         elif self.conf.get('checkpoint_path'):
-            # 如果没有断点，但配置了 path，则视为 finetune 或预训练权重加载
-            # 这里调用 BaseTrainer 的 load_model 只加载权重，不恢复 epoch/optim
             bare_model = self.model.module if hasattr(self.model, 'module') else self.model
             self.load_model(bare_model, self.conf['checkpoint_path'])
         else:
             if self.rank == 0: print("No checkpoint found. Starting from scratch.")
 
     def _calculate_and_log_complexity(self):
-        """ [新增] 计算 FLOPs 和 Params 并保存 """
+        """Compute FLOPs/MACs/params and save them to CSV."""
         print("Running Model Complexity Analysis (calflops)...")
         input_ant = self.conf['input_ant_size']
         input_car = self.conf['input_car_size']
@@ -464,12 +440,11 @@ class Trainer(BaseTrainer):
             "input_x_now": input1,
             "x_past": input2
         }
-        # 获取 bare model 防止 DDP 包装影响
+        # Use the bare model to avoid DDP wrapper side effects.
         bare_model = self.model.module if hasattr(self.model, 'module') else self.model
         flops, macs, params = calculate_flops(model=bare_model, kwargs=inputs, print_results=False)
         print(f"✅ FLOPs:{flops}  MACs:{macs}  Params:{params}")
 
-        # 写入 CSV
         with open(self.complexity_csv_path, 'w', newline='') as f:
             writer = csv.writer(f)
             writer.writerow(['Past_Len', 'FLOPs', 'MACs', 'Params'])
@@ -478,14 +453,13 @@ class Trainer(BaseTrainer):
 
     def save_checkpoint(self, epoch, is_final=False):
         """
-        保存包含完整训练状态的 Checkpoint
+        Save a full training checkpoint (model + optimizer + scheduler + step).
         """
         if self.rank == 0:
-            save_path = os.path.join(self.exp_dir, 'ckpts')
+            save_path = self.exp_dir if is_final else os.path.join(self.exp_dir, 'ckpts')
             os.makedirs(save_path, exist_ok=True)
 
             bare_model = self.model.module if hasattr(self.model, 'module') else self.model
-
             state = {
                 'epoch': epoch,
                 'model': bare_model.state_dict(),
@@ -500,23 +474,18 @@ class Trainer(BaseTrainer):
 
     def load_checkpoint(self, path):
         """
-        加载完整训练状态 (Resume)
+        Load a full checkpoint for resume training.
         """
         state = torch.load(path, map_location=self.device)
 
-        # 1. 恢复 Epoch 和 Step
         self.start_epoch = state['epoch'] + 1
-        self.global_step = state.get('global_step', self.start_epoch * 100)  # 估算或读取
+        self.global_step = state.get('global_step', self.start_epoch * 100)
 
-        # 2. 恢复模型权重
-        # 注意：save_checkpoint 保存的是 bare model，所以加载到 bare model
         bare_model = self.model.module if hasattr(self.model, 'module') else self.model
         bare_model.load_state_dict(state['model'])
 
-        # 3. 恢复优化器和调度器
         self.optimizer.load_state_dict(state['optimizer'])
         self.scheduler.load_state_dict(state['scheduler'])
 
         if self.rank == 0:
             print(f"State loaded. Resuming from Epoch {self.start_epoch}")
-

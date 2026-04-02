@@ -1,39 +1,45 @@
-# ================= 全局设置 =================
+# ================= Global Settings =================
 task: train
-scheme: acdnet      # 选定模型: rcdnet, afcoupler, acoupler, acdnet
-exp_dir: ./exp/my_train/input_3antx3car/ACDNet
+scheme: SCHEME      # select model: convcoupler / afcoupler / acoupler / acdnet / rcdnet
+exp_dir: ./exp/DeepMIMO/input_3antx3car/SCHEME
 
-# 数据配置
+# ================= Dataset Config =================
 dataset_type: DeepmimoO1
 data_dirs:
-  - ./data_ssd/DeepMIMO/O1/32antx32car_3p5GHz_40MHz_R501-1400_V1_23-9-25
+  - ./data/DeepMIMO/O1/32antx32car_3p5GHz_40MHz_R501-1400_V1_23-9-25
+const_h: 10000
+
 #dataset_type: DICHASUS
 #data_dirs:
-#  - ./data_ssd/DICHASUS/h5_CD/ca01
-#const_h: 10000
+#  - ./data/DICHASUS/h5_CD/ca01
+#const_h: 1
 
-# ================= 系统环境配置 (System Config) =================
-# 这些参数决定了输入数据的形状和物理含义，所有模型共享
-num_ant: 32           # 天线总数
-num_car: 32           # 载波总数
-input_ant_size: 3     # 输入的稀疏天线数
-input_car_size: 3     # 输入的稀疏载波数
-num_cur_range_train: [0, 1]   # 训练阶段加入past的当前样本数量，之前[0, 4]
-train_snrdb_range: ~    # 根据SNR范围，给过去样本随机加噪
+dichasus:
+  train_dataset_name: train_nearest32_seq36000.h5
+  test_dataset_name: test_nearest32_seq36000.h5
 
-# ================= 训练流程参数 =================
+# ================= System Config =================
+# These parameters define the input shape and physical meaning, shared by all models
+num_ant: 32                   # Total number of antennas
+num_car: 32                   # Total number of carriers
+input_ant_size: 3             # Number of sparse input antennas
+input_car_size: 3             # Number of sparse input carriers
+num_cur_range_train: [0, 1]   # Number of current samples added into past during training (previously [0, 4])
+train_snrdb_range: ~          # Randomly add noise to past samples according to the SNR range
+
+# ================= Training Pipeline Parameters =================
 max_samples: ~
-batch_size: 100   # 之前 500
-micro_batch: 100  # 之前 500
+batch_size: 100   # acdnet/rcdnet: 500
+micro_batch: 100  # acdnet/rcdnet: 500
 num_workers: 4
 num_epochs: 100000
 print_freq: 10
-log_step_inter: 100 # 100
-save_epoch_inter: 10000 # 10000
-test_epoch_inter: 200 # 200
+log_step_inter: 100
+save_epoch_inter: 10000
+test_epoch_inter: 200
 tensorboard_writer: True
 
-# ================= 训练流程参数 =================
+# ================= Loss Configuration =================
 loss_type: mse
 mse_weighted_by_snr:
   clip_min: ~   # 0
@@ -41,19 +47,12 @@ mse_weighted_by_snr:
   use_softmax: False
   temperature: 1
 
-# ================= 模型架构配置 (Model Architecture) =================
-# TODO: 检查模型配置
-# 0. Coupler
-coupler:
+# ================= All Model Schemes =================
+conv_coupler:
   d_model: 128
   depth_pred: 8
-
-conv_coupler:
-  d_model: 256   # 128
-  depth_pred: 8  # 16
   dropout: 0.
 
-# 1. ACoupler
 acoupler:
   d_model: 128
   num_heads: 1
@@ -61,97 +60,48 @@ acoupler:
   depth_pred: 8
   dropout: 0.
 
-# 1. ACouplerV2
-acouplerV2:
-  d_model: 128
-  num_heads: 4
-  depth_pred: 8
-
-acoupler_flat:
-  d_model: 128
-  num_heads: 1
-  heads_aggregate: False
-  depth_pred: 8
-  dropout: 0.
-
-acoupler_flat_v2:
-  d_model: 128
-  num_heads: 8
-  depth_pred: 8
-  dropout: 0.
-
-acoupler_standard:
-  d_model: 2048
-  num_heads: 8
-  dim_feedforward: 128   # cmixer 隐层宽度
-  depth_pred: 8
-  dropout: 0.
-  has_proj: False
-
-# 2. AFCoupler
 afcoupler:
   d_model: 128
   depth_pred: 8
   is_learnable: True
   dropout: 0.
 
-# 3. RCDNet
 rcdnet:
-  depth: 3         # 估计网络深度
-  depth_pred: 2    # 预测网络深度
+  depth: 3         # Estimation network depth
+  depth_pred: 2    # Prediction network depth
   hidden_size: 512
   dropout: 0.
 
-# 4. ACDNet
 acdnet:
   depth: 3
   depth_pred: 6
   hidden_size: 512
   dropout: 0.
 
-# 5. AFCDNet
-afcdnet:
-  depth: 3
-  depth_pred: 6
-  hidden_size: 512
-
 convlstm:
   hidden_dim: 16
   depth_pred: 2
 
-# ================= 优化器与调度器配置 =================
-#TODO: 检查学习率配置
-#TODO: AFCoupler的学习率是MultiStep，ConvLSTM目前用StepLR
-# 初始学习率 (如果使用 TransformerWarmup，这个值通常只作为基准，或者被调度器覆盖)
+# ================= Optimizer and Scheduler Configuration =================
+# Initial learning rate (if TransformerWarmup is used, this is usually a baseline or overridden by the scheduler)
 learning_rate: !!float 1e-3
 
 lr_scheduler:
   type: TransformerWarmupScheduler
-  update_mode: step           # 关键字段: step 或 epoch
+  update_mode: step           # Update mode: step / epoch
 
 lr_scheduler_list:
-  # --- 方案 A: Transformer 预热 (按 step 更新) ---
+  # --- Scheme A: Transformer warmup (updated per step) ---
   TransformerWarmupScheduler:
     d_model: 512
     warmup_steps: 4000
 
-  # --- 方案 B: StepLR 衰减 (按 epoch 更新) ---
+  # --- Scheme B: StepLR decay (updated per epoch) ---
   StepLR:
-    step_size: 10000          # 每 10000 个 epoch 衰减一次
+    step_size: 10000          # Decay once every 10000 epochs
     gamma: 0.8
 
-  # --- 方案 C: MultiStepLR 衰减 (在 epoch 到达指定 milestones 更新) ---
+  # --- Scheme C: MultiStepLR decay (updated when epochs reach specified milestones) ---
   MultiStepLR:
     milestones: [30000, 40000, 50000]
     gamma: 0.2
-
-  # --- 方案 C: CosineAnnealing (按 epoch 更新) ---
-  # type: CosineAnnealingLR
-  # update_mode: epoch
-  # params:
-  #   T_max: 100000           # T_max 对应 epoch 数
-  #   eta_min: 0
-
-#  type: ConstLR
-#  update_mode: epoch           # 关键字段: step 或 epoch
-#  params: ~

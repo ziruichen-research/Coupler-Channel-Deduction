@@ -19,7 +19,7 @@
       <paths name="xingziqing@10.13.72.166:22 password (2)">
         <serverdata>
           <mappings>
-            <mapping deploy="/home/xingziqing/Documents/202601_Coupler" local="$PROJECT_DIR$" web="/" />
+            <mapping deploy="/home/xingziqing/Documents/release/Coupler-Channel-Deduction" local="$PROJECT_DIR$" web="/" />
           </mappings>
         </serverdata>
       </paths>

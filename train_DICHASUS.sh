@@ -2,9 +2,9 @@ python main.py --conf=./conf/train.yaml \
 --gpu=3 \
 --mod \
 dataset_type=DICHASUS \
-data_dirs=['./data_ssd/DICHASUS/h5_CD/0152-0157_DirectSample512to32_v2'] \
-train_dataset_name='train_nearest32_seq36000.h5' \
-test_dataset_name='test_nearest32_seq36000.h5' \
+data_dirs=['./data/DICHASUS/h5_CD/0152-0157_DirectSample512to32'] \
+dichasus.train_dataset_name='train_nearest32_seq36000.h5' \
+dichasus.test_dataset_name='test_nearest32_seq36000.h5' \
 const_h=1 \
 input_ant_size=16 \
 input_car_size=16 \

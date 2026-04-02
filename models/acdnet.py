@@ -33,7 +33,7 @@ class MixerBlock_2D(nn.Module):
             FeedForward(car_size * 2, car_size * 2 * 2, dropout),
         )
 
-    def forward(self, x):  # 输入、输出：[b ant car c]
+    def forward(self, x):
         x = rearrange(x, 'b ant car c -> b car (ant c)')
         x = x + self.ant_mix(x)
         x = rearrange(x, 'b car (ant c) -> b ant car c', c=2)
@@ -67,7 +67,7 @@ class est_net(nn.Module):
         self.fc_reverse1 = nn.Linear(ant_size * 2, ant_size * 2)
         self.fc_reverse2 = nn.Linear(car_size * 2, car_size * 2)
 
-    def forward(self, x):  #
+    def forward(self, x):
         out = rearrange(x, 'b in_ant in_car c -> b in_car (in_ant c)')
         out = self.fc1(out)
         out = rearrange(out, 'b in_car (ant c) -> b ant (in_car c)', c=2)

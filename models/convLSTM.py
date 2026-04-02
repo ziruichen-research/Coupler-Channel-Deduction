@@ -7,11 +7,13 @@ from einops import rearrange, repeat
 class ConvLSTMCell(nn.Module):
     def __init__(self, input_dim: int, hidden_dim: int, kernel_size, bias=True):
         """
-        初始化 ConvLSTM 单元
-        :param input_dim: 输入张量的通道数 (Channels)
-        :param hidden_dim: 隐藏状态的通道数
-        :param kernel_size: 卷积核大小 (int or tuple)
-        :param bias: 是否使用偏置
+        ConvLSTM cell.
+
+        Args:
+            input_dim: Number of input channels.
+            hidden_dim: Number of hidden channels.
+            kernel_size: Convolution kernel size (int or tuple).
+            bias: Whether to use bias in the input projection.
         """
         super(ConvLSTMCell, self).__init__()
 
@@ -90,13 +92,15 @@ class ConvLSTM(nn.Module):
     def __init__(self, input_dim, hidden_dim, kernel_size, num_layers, batch_first=True, bias=True,
                  return_all_layers=False):
         """
-        多层 ConvLSTM
-        :param input_dim: 输入通道数
-        :param hidden_dim: 隐藏层通道数 (可以是列表，对应每层的 hidden_dim)
-        :param kernel_size: 卷积核大小
-        :param num_layers: 层数
-        :param batch_first: 输入数据格式是否为 (Batch, Time, Channels, Height, Width)
-        :param return_all_layers: 是否返回所有层的状态
+        Stacked ConvLSTM.
+
+        Args:
+            input_dim: Number of input channels.
+            hidden_dim: Hidden channels per layer (int or list).
+            kernel_size: Convolution kernel size.
+            num_layers: Number of stacked ConvLSTM layers.
+            batch_first: If True, input layout is [B, T, C, H, W].
+            return_all_layers: If True, return outputs/states for all layers.
         """
         super(ConvLSTM, self).__init__()
 
@@ -230,25 +234,3 @@ class ConvLSTMCoupler(nn.Module):
         out = rearrange(out, 'b ant (car c) -> b ant car c', c=2)
 
         return out
-
-
-
-
-# # --- 使用示例 ---
-# if __name__ == '__main__':
-#     # 假设输入：Batch=2, Time=5, Channels=3 (RGB), Height=64, Width=64
-#     input_tensor = torch.randn(2, 5, 3, 64, 64)
-#
-#     # 定义模型：输入通道3，隐藏通道64，卷积核3x3，2层堆叠
-#     convlstm = ConvLSTM(input_dim=3, hidden_dim=64, kernel_size=3, num_layers=2)
-#
-#     # 前向传播
-#     output, last_states = convlstm(input_tensor)
-#
-#     # 输出检查
-#     # output shape 应为 (2, 5, 64, 64, 64) -> (Batch, Time, Hidden, H, W)
-#     print("Output shape:", output.shape)
-#
-#     # 检查状态
-#     h_last, c_last = last_states[-1]
-#     print("Last hidden state shape:", h_last.shape)

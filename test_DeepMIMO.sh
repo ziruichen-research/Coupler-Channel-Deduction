@@ -1,15 +1,11 @@
 python main.py --conf=./conf/test.yaml \
---gpu=3 \
+--gpu=0 \
 --mod \
-input_ant_size=4 \
-input_car_size=4 \
-scheme=acoupler_flat_v2 \
-acoupler_flat_v2.d_model=128 \
-acoupler_flat_v2.num_heads=1 \
-acoupler_flat_v2.dropout=0 \
-exp_dir=./exp/my_train/input_4antx4car/data2000_Ncur0or1/ACouplerFlatV2-head1-d128_LR-d1024/test \
-checkpoint_path=./exp/my_train/input_4antx4car/data2000_Ncur0or1/ACouplerFlatV2-head1-d128_LR-d1024/ckpts/model.pth \
-test_tasks.trace_smooth.past_len_list=[0,1,4,8,16]
+input_ant_size=3 \
+input_car_size=3 \
+scheme=afcoupler \
+exp_dir=./exp/DeepMIMO/input_3antx3car/data2000/AFCoupler/test \
+checkpoint_path=./exp/DeepMIMO/input_3antx3car/data2000/AFCoupler/model.pth \
 
 #activate_tasks=['trace_smooth'] \
 

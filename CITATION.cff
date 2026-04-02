@@ -1,0 +1,43 @@
+cff-version: 1.2.0
+title: "Coupler-Channel-Deduction"
+message: "If you use this repository, please cite the paper below."
+type: software
+authors:
+  - family-names: "Chen"
+    given-names: "Zirui"
+  - family-names: "Xing"
+    given-names: "Ziqing"
+  - family-names: "Zhang"
+    given-names: "Zhaoyang"
+  - family-names: "Ruan"
+    given-names: "Hongning"
+  - family-names: "Yang"
+    given-names: "Zhaohui"
+  - family-names: "Huang"
+    given-names: "Chongwen"
+  - family-names: "Debbah"
+    given-names: "Merouane"
+repository-code: "https://github.com/<your-org-or-id>/Coupler-Channel-Deduction"
+abstract: >
+  Official implementation for Coupler-based wireless channel deduction models
+  on DeepMIMO and DICHASUS datasets.
+preferred-citation:
+  type: article
+  title: "Full-Domain Staggered Coupler: A Native-AI Neural Backbone for Wireless Channel Representation and Deduction"
+  authors:
+    - family-names: "Chen"
+      given-names: "Zirui"
+    - family-names: "Xing"
+      given-names: "Ziqing"
+    - family-names: "Zhang"
+      given-names: "Zhaoyang"
+    - family-names: "Ruan"
+      given-names: "Hongning"
+    - family-names: "Yang"
+      given-names: "Zhaohui"
+    - family-names: "Huang"
+      given-names: "Chongwen"
+    - family-names: "Debbah"
+      given-names: "Merouane"
+  year: 2026
+  note: "Preprint / draft. Update DOI, journal, and pages after publication."

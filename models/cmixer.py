@@ -33,7 +33,7 @@ class MixerBlock_2D(nn.Module):
             FeedForward(car_size * 2, self.d_model, dropout),
         )
 
-    def forward(self, x):  # 输入、输出：[b ant car c]
+    def forward(self, x):
         x = rearrange(x, 'b ant car c -> b car (ant c)')
         x = x + self.ant_mix(x)
         x = rearrange(x, 'b car (ant c) -> b ant car c', c=2)
@@ -50,15 +50,11 @@ class linear2d_complex(nn.Module):
         super(linear2d_complex, self).__init__()
         self.size1 = size1
         self.size2 = size2
-        # 线性层1: 作用在 s1 和 c (c=2) 维度上
+
         self.linear1 = nn.Linear(self.size1 * 2, self.size1 * 2)
-        # 线性层2: 作用在 s2 和 c (c=2) 维度上
         self.linear2 = nn.Linear(self.size2 * 2, self.size2 * 2)
 
     def forward(self, x):
-        # x 的形状是 [... s1 s2 2]
-        # ... 代表一个或多个 batch 维度
-
         output = rearrange(x, '... s1 s2 c -> ... s2 (s1 c)')
         output = self.linear1(output)
         output = rearrange(output, '... s2 (s1 c) -> ... s1 s2 c', c=2)

@@ -1,40 +1,40 @@
-# ================= 全局设置 =================
+# ================= Global Settings =================
 task: test
-scheme: SCHEME
-exp_dir: ./exp/legacy_deepmimoO1/input_3antx3car/AFCoupler/test # 测试结果输出目录
+scheme: SCHEME      # select model: convcoupler / afcoupler / acoupler / acdnet / rcdnet
+exp_dir: ./exp/DeepMIMO/input_3antx3car/SCHEME/test  # Output directory for test results
 note: ~
 
-# 数据集根目录 (支持列表，可以同时测试多个数据集)
+# Dataset root directory (supports a list for testing multiple datasets)
 dataset_type: DeepmimoO1
 data_dirs:
-  - ./data_ssd/DeepMIMO/O1/32antx32car_3p5GHz_40MHz_R501-1400_V1_23-9-25
+  - ./data/DeepMIMO/O1/32antx32car_3p5GHz_40MHz_R501-1400_V1_23-9-25
 const_h: 10000
-# 预训练模型路径 (必须指定)
-checkpoint_path: ./exp/legacy_deepmimoO1/input_3antx3car/AFCoupler/model.pth
+# Pretrained model path (must be specified)
+checkpoint_path: ./exp/DeepMIMO/input_3antx3car/SCHEME/model.pth
 
 #dataset_type: DICHASUS
 #data_dirs:
-#  - ./data_ssd/DICHASUS/h5_CD/ca01
+#  - ./data/DICHASUS/h5_CD/ca01
 #const_h: 1
 dichasus:
   train_dataset_name: train_nearest32_seq36000.h5
   test_dataset_name: test_nearest32_seq36000.h5
-  trace_src_dataset: ./data_ssd/DICHASUS/src_h5/ca0x/data_ca01.h5
+  trace_src_dataset: ./data/DICHASUS/src_h5/ca0x/data_ca01.h5
   trace_part_name: dichasus-ca01_part4
-#checkpoint_path: ./exp/DICHASUS/input_8antx8car/ACoupler_head1_data5000/ckpts/ckpt_010000.pth
+#checkpoint_path: ./exp/DICHASUS/input_8antx8car/SCHEME/model.pth
 
-# 硬件设置
-batch_size: 500           # 测试时的 batch size 可以稍微大一点
+# Hardware Settings
+batch_size: 500           # Batch size can be slightly larger during testing
 num_workers: 4
 
-# ================= 模型参数 =================
-# 注意：这些参数必须与训练该 .pth 文件时的配置完全一致
+# ================= Model Parameters =================
+# Note: these parameters must exactly match the config used to train the .pth file
 num_ant: 32
 num_car: 32
-input_ant_size: 4
-input_car_size: 4
+input_ant_size: 3
+input_car_size: 3
 
-# ================= 训练流程参数 =================
+# ================= Loss Configuration =================
 loss_type: ~
 mse_weighted_by_snr:
   clip_min: ~   # 0
@@ -42,14 +42,12 @@ mse_weighted_by_snr:
   use_softmax: False
   temperature: 1
 
-# ================= 模型架构配置 (Model Architecture) =================
-# baselines
+# ================= Model Architecture Configuration =================
 conv_coupler:
   d_model: 256
   depth_pred: 8
   dropout: 0.
 
-# 1. ACoupler
 acoupler:
   d_model: 128
   num_heads: 1
@@ -57,50 +55,23 @@ acoupler:
   depth_pred: 8
   dropout: 0.
 
-acouplerV2:
-  d_model: 128
-  num_heads: 4
-  depth_pred: 8
-
-acoupler_flat:
-  d_model: 128
-  num_heads: 1
-  heads_aggregate: False
-  depth_pred: 8
-  dropout: 0.
-
-acoupler_flat_v2:
-  d_model: 128
-  num_heads: 8
-  depth_pred: 8
-  dropout: 0.
-
-# 2. AFCoupler
 afcoupler:
   d_model: 128
   depth_pred: 8
   is_learnable: True
   dropout: 0.
 
-# 3. RCDNet
 rcdnet:
-  depth: 3         # 估计网络深度
-  depth_pred: 2    # 预测网络深度
+  depth: 3         # Estimation network depth
+  depth_pred: 2    # Prediction network depth
   hidden_size: 512
   dropout: 0.
 
-# 4. ACDNet
 acdnet:
   depth: 3
   depth_pred: 6
   hidden_size: 512
   dropout: 0.
-
-# 5. AFCDNet
-afcdnet:
-  depth: 3
-  depth_pred: 6
-  hidden_size: 512
 
 convlstm:
   hidden_dim: 16
@@ -114,46 +85,39 @@ activate_tasks:
   - standard
   - history_length
   - production_noise
-#  - channel_vis
   - trace_smooth
 
-# ================= 测试任务列表 =================
-# Tester 会依次执行下面定义的任务
+# ================= Test Task List =================
+# The tester executes the tasks defined below in order
 test_tasks:
-  # --- 测试任务 0: 测试模型复杂度 ---
+  # --- Test Task 0: Evaluate model complexity ---
   complexity:
-    past_len: 16  # 指定测试时使用的历史帧长度
+    past_len: 16  # Specify the historical frame length used for testing
     print_structure: False
 
-  # --- 任务 1: 标准性能分布测试 ---
-  # 计算 NMSE 和 Corr，保存所有样本数据用于画 CDF
+  # --- Task 1: Standard performance distribution test ---
+  # Compute NMSE and Corr, and save all sample data for CDF plotting
   standard:
     scenarios: [specifictest_mobile, specifictest_static]
 #    past_len: 16
 
-  # --- 任务 2: 历史长度鲁棒性测试 ---
-  # 测试当给定的过去帧数不同时(0到16帧)的性能
+  # --- Task 2: History-length robustness test ---
+  # Test performance with different numbers of past frames (0 to 16)
   history_length:
-    scenarios: [specifictest_mobile, specifictest_static] # 通常在静态或特定场景测这个
+    scenarios: [specifictest_mobile, specifictest_static]
     past_lens: [0, 1, 2, 4, 8, 16]
 
-  # --- 任务 3: 噪声鲁棒性测试 ---
-  # 测试在不同位置添加不同强度的噪声时的性能
+  # --- Task 3: Noise robustness test ---
+  # Test performance under different noise levels added at different positions
   production_noise:
     scenarios: [specifictest_mobile, specifictest_static]
-    # targets: 噪声加在哪里? (all=当前+历史, now=仅当前, past=仅历史)
+    # targets: where to inject noise? (all=current+past, now=current only, past=past only)
     noise_targets: [all, past]    # all, past, now
-    # noise_levels: 扰动噪声强度
+    # noise_levels: perturbation noise intensity
     noise_levels: [0, 0.01, 0.02, 0.04, 0.08, 0.16, 0.32, 0.64, 1.28]
 
-  # --- 任务 4: 可视化数据生成 (对应 test_image_tosee.py) ---
-  # 生成 .npy 文件供后续画图脚本使用
-  channel_vis:
-    scenarios: [specifictest_mobile, specifictest_static]
-    max_samples: 50  # 限制保存样本数，设为 -1 保存全部
-
-  # --- 任务 5: 序列追踪 (可视化数据保存) ---
-  # 保存 AR 和 ideal case 的 trace 结果，用于后续画图
+  # --- Task 5: Sequence tracing (save data for visualization) ---
+  # Save trace results for AR and ideal case for downstream plotting
   trace_smooth:
     past_len_list: [8]
 

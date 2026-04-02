@@ -1,0 +1,19 @@
+dependencies:
+  - python=3.11.13
+  - pip=25.2
+  - numpy=1.26.4
+  - scipy=1.16.2
+  - pandas=2.3.3
+  - matplotlib=3.10.6
+  - seaborn=0.13.2
+  - scikit-learn=1.8.0
+  - h5py=3.14.0
+  - pyyaml=6.0.3
+  - tqdm=4.67.1
+  - jupyterlab=4.4.9
+  - pip:
+      - torch==2.9.1+cu128
+      - tensorflow==2.15.1
+      - einops==0.8.1
+      - hdf5storage==0.2.2
+      - calflops==0.3.2

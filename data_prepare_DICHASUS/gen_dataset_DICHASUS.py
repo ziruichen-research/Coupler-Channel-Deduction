@@ -1,3 +1,10 @@
+"""Build a unified HDF5 dataset from raw DICHASUS TFRecords.
+
+This script parses raw CSI records, applies calibration and antenna reordering,
+optionally crops effective bandwidth and antenna power normalization, downsamples
+subcarriers, and finally saves a merged HDF5 file with metadata.
+"""
+
 import os
 os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
@@ -14,9 +21,7 @@ import matplotlib.pyplot as plt
 from einops import rearrange
 from tqdm import tqdm
 import h5py
-from data_prepare.visualization import visualize_trajectory_over_time
-
-# https://dichasus.inue.uni-stuttgart.de/datasets/data/dichasus-ca0x/
+# from data_prepare_DICHASUS.visualization import visualize_trajectory_over_time
 
 
 def downsampling_DICHASUS_dataset(raw_dataset_paths, offset_path, assignments_matrix,
@@ -25,14 +30,16 @@ def downsampling_DICHASUS_dataset(raw_dataset_paths, offset_path, assignments_ma
                                   downsampling_factor=32,
                                   downsampling_method='fir',
                                   is_ant_power_norm=False):
-    # 提取所有 Part 的名称，用于后续保存 Metadata
-    # 例如 ['.../dichasus-ca01_part1.tfrecords', '.../part2...'] -> ['dichasus-ca01_part1', 'dichasus-ca01_part2']
+    """
+    Convert one or more raw TFRecord parts into a merged HDF5 dataset.
+    """
+    # Keep source part names as metadata.
     part_names = [os.path.splitext(os.path.basename(p))[0] for p in raw_dataset_paths]
     source_name_str = ",".join(part_names)
     print(f"Global processing plan: {source_name_str}")
     print(f"Config: Bandwidth={effective_bandwidth}, Method={downsampling_method.upper()}, Factor={downsampling_factor}")
 
-    # 1. 预处理定义 (这部分对所有 Part 通用)
+    # Shared TFRecord schema.
     feature_description = {
         'csi': tf.io.FixedLenFeature([], tf.string, default_value=''),
         'gt-interp-age-tachy': tf.io.FixedLenFeature([], tf.float32, default_value=0),
@@ -53,7 +60,7 @@ def downsampling_DICHASUS_dataset(raw_dataset_paths, offset_path, assignments_ma
         time = tf.ensure_shape(record["time"], ())
         return csi, pos, snr, time
 
-    # 读取校准参数
+    # Load STO/CPO calibration parameters.
     with open(offset_path, 'r') as file:
         offsets = json.load(file)
 
@@ -63,68 +70,64 @@ def downsampling_DICHASUS_dataset(raw_dataset_paths, offset_path, assignments_ma
         csi = tf.multiply(csi, tf.exp(tf.complex(0.0, sto_offset + cpo_offset)))
         return csi, pos, snr, time
 
-    # 定义天线重排索引
+    # Antenna reordering index.
     assignments = np.ravel(assignments_matrix)
     ftype = 'fir'
 
-    # 用于收集最终合并后的数据列表
+    # Buffers for all processed parts.
     final_data_chunks = []
     final_loc_chunks = []
     final_snr_chunks = []
     final_time_chunks = []
     final_source_idx_chunks = []
 
-    # 对 dataset_paths 进行循环，逐个 Part 处理
+    # Process each TFRecord part independently, then concatenate.
     for part_idx, single_path in enumerate(raw_dataset_paths):
         current_part_name = part_names[part_idx]
         print(f"\n>>> Processing Part {part_idx + 1}/{len(raw_dataset_paths)}: {current_part_name}")
 
-        # 针对当前文件创建 dataset
+        # Build dataset for the current part.
         raw_dataset = tf.data.TFRecordDataset([single_path]).map(record_parse_function)
         raw_dataset = raw_dataset.map(apply_calibration)
 
-        # 临时列表，用于存储当前 Part 的数据
+        # Per-part buffers.
         part_data_list = []
         part_loc_list = []
         part_snr_list = []
         part_time_list = []
 
-        # 处理当前 Part 的循环
+        # Parse and process each record in this part.
         for i, (csi, pos, snr, time) in enumerate(tqdm(raw_dataset, desc=f"Parsing {current_part_name}")):
-            # if i >= 25: break
-
             data = csi.numpy().astype(np.complex64)
             loc = pos.numpy().astype(np.float32)
             snr = snr.numpy().astype(np.float32)
             time = time.numpy().astype(np.float32)
 
-            # --- [新增步骤] 截取有效频带 (Effective Bandwidth) ---
+            # Keep center subcarriers only when effective bandwidth < 1.
             if effective_bandwidth < 1.0:
-                num_sc = data.shape[1]  # 通常是 1024
+                num_sc = data.shape[1]
                 num_effective = int(num_sc * effective_bandwidth)
                 start_idx = (num_sc - num_effective) // 2
-                # 截取中心部分
                 data = data[:, start_idx: start_idx + num_effective]
 
-            # B. 天线重排
+            # Antenna remapping.
             data = data[assignments, :]
             snr = snr[assignments]
 
-            # C. 功率校准
+            # Optional per-antenna power equalization.
             global_power = np.mean(np.abs(data) ** 2)
             ant_power = np.mean(np.abs(data) ** 2, axis=1, keepdims=True)
             data_power_calibrated = (data / np.sqrt(ant_power)) * np.sqrt(global_power)
 
-            # A. 降采样
+            # Subcarrier downsampling.
             data_input = data_power_calibrated if is_ant_power_norm else data
             if downsampling_method == 'fir':
-                # 方式 1: FIR 滤波器抗混叠 + 抽取 (推荐，保留低频信息)
+                # Anti-alias filtering + decimation.
                 data_real = sp.signal.decimate(data_input.real, downsampling_factor, axis=1, zero_phase=True, ftype=ftype)
                 data_imag = sp.signal.decimate(data_input.imag, downsampling_factor, axis=1, zero_phase=True, ftype=ftype)
                 data_save = data_real + 1j * data_imag
             elif downsampling_method == 'direct':
-                # 方式 2: 直接切片等间隔采样 (简单，对应子载波 0, 32, 64...)
-                # data_input shape: [32, 1024] -> [32, 32]
+                # Uniform stride sampling.
                 data_save = data_input[:, ::downsampling_factor]
             else:
                 raise ValueError(f"Unknown downsampling method: {downsampling_method}. Use 'fir' or 'direct'.")
@@ -134,13 +137,13 @@ def downsampling_DICHASUS_dataset(raw_dataset_paths, offset_path, assignments_ma
             part_snr_list.append(snr)
             part_time_list.append(time)
 
-        # 当前 Part 读取完毕，堆叠为 numpy 数组
+        # Stack records from this part.
         part_data = np.stack(part_data_list, axis=0)
         part_loc = np.stack(part_loc_list, axis=0)
         part_snr = np.stack(part_snr_list, axis=0)
         part_time = np.stack(part_time_list, axis=0)
 
-        # [关键修改]：在 Part 内部按时间排序
+        # Sort within each part by timestamp.
         print(f"Sorting {current_part_name} by timestamp...")
         sort_idx = np.argsort(part_time)
 
@@ -150,14 +153,14 @@ def downsampling_DICHASUS_dataset(raw_dataset_paths, offset_path, assignments_ma
         part_time = part_time[sort_idx]
         part_source_idx = np.full((part_data.shape[0],), part_idx, dtype=np.int8)
 
-        # 将排序好的当前 Part 数据加入最终列表
+        # Append this part to global buffers.
         final_data_chunks.append(part_data)
         final_loc_chunks.append(part_loc)
         final_snr_chunks.append(part_snr)
         final_time_chunks.append(part_time)
         final_source_idx_chunks.append(part_source_idx)
 
-    # 循环结束后，将所有 Part 拼接在一起 (Concatenate)
+    # Merge all processed parts.
     print("\nConcatenating all parts...")
     data = np.concatenate(final_data_chunks, axis=0)
     loc = np.concatenate(final_loc_chunks, axis=0)
@@ -167,14 +170,13 @@ def downsampling_DICHASUS_dataset(raw_dataset_paths, offset_path, assignments_ma
 
     print(f"All processing done. Final Shape: {data.shape}")
 
-    # --- 保存为 HDF5 ---
+    # Save to HDF5.
     os.makedirs(save_path, exist_ok=True)
     filepath = os.path.join(save_path, filename)
 
     print(f"Saving to HDF5: {filepath} ...")
     with h5py.File(filepath, 'w') as f:
-        # [关键修改] 动态计算 Chunk 大小
-        # 使用实际的数据维度 data.shape[2] 作为 chunk 的最后一维，而不是写死 32
+        # Chunk shape follows runtime subcarrier count.
         chunk_shape = (1, 32, data.shape[2])
         f.create_dataset('data', data=data, chunks=chunk_shape)
 
@@ -185,42 +187,26 @@ def downsampling_DICHASUS_dataset(raw_dataset_paths, offset_path, assignments_ma
 
         f.attrs['part_names'] = source_name_str
         f.attrs['downsampling_method'] = downsampling_method
-        f.attrs['effective_bandwidth'] = effective_bandwidth # 记录参数
+        f.attrs['effective_bandwidth'] = effective_bandwidth
         f.attrs['downsampling_factor'] = downsampling_factor
 
     print(f'Saved sorted dataset to {filepath}')
     print(f'Source composition: {source_name_str}')
 
-    # 简单的轨迹可视化（验证拼接和排序是否正确）
+    # Optional sanity check for temporal order.
     # visualize_trajectory_over_time(loc, time, title=f"Trajectory: {source_name_str}")
 
 
 if __name__ == '__main__':
-    # # ca0x
-    # is_ant_power_norm = False
-    # effective_bandwidth = 0.5
-    # downsampling_factor = 16
-    # downsampling_method = 'direct'
-    # raw_dataset_paths = [f'../data_ssd/DICHASUS/src/ca0x/dichasus-ca01_part{k + 1}.tfrecords' for k in range(4)]
-    # offset_path = '../data_ssd/DICHASUS/src/ca0x/reftx-offsets-dichasus-ca0x.json'
-    # assignments_matrix = [
-    #     [0, 13, 31, 29, 3, 7, 1, 12],
-    #     [30, 26, 21, 25, 24, 8, 22, 15],
-    #     [28, 5, 10, 14, 6, 2, 16, 18],
-    #     [19, 4, 23, 17, 20, 11, 9, 27]
-    # ]
-    # save_path = '../data_ssd/DICHASUS/src_h5/ca0x_DirectSample512to32'
-    # filename = f'data_ca01_ant_norm.h5' if is_ant_power_norm else f'data_ca01.h5'
-
-    # 015x
+    # 015x：https://dichasus.inue.uni-stuttgart.de/datasets/data/dichasus-015x/
     is_ant_power_norm = False
     effective_bandwidth = 0.5
     downsampling_factor = 16
     downsampling_method = 'direct'
-    # idx_list = ['0152', '0153', '0154', '0155', '0157']   # 没有 0158
-    idx_list = ['0158']  # 只有 0158
-    raw_dataset_paths = [f'../data_ssd/DICHASUS/src/015x/dichasus-{idx}.tfrecords' for idx in idx_list]
-    offset_path = '../data_ssd/DICHASUS/src/015x/reftx-offsets-dichasus-015x.json'
+    idx_list = ['0152', '0153', '0154', '0155', '0157']  # Excluding 0158
+    # idx_list = ['0158']  # Single-part example
+    raw_dataset_paths = [f'../data/DICHASUS/src/015x/dichasus-{idx}.tfrecords' for idx in idx_list]
+    offset_path = '../data/DICHASUS/src/015x/reftx-offsets-dichasus-015x.json'
     assignments_matrix = [
         [28, 5, 10, 14, 6, 2, 16, 18],
         [19, 4, 23, 17, 20, 11, 9, 27],
@@ -228,9 +214,9 @@ if __name__ == '__main__':
         [30, 26, 21, 25, 22, 15, 24, 8]
 
     ]
-    save_path = '../data_ssd/DICHASUS/src_h5/0152-0157_DirectSample512to32_v2'
-    # filename = f'data_0152-0157_ant_norm.h5' if is_ant_power_norm else f'data_0152-0157.h5'
-    filename = f'data_0158_ant_norm.h5' if is_ant_power_norm else f'data_0158.h5'
+    save_path = '../data/DICHASUS/src_h5/0152-0157_DirectSample512to32'
+    filename = f'data_0152-0157_ant_norm.h5' if is_ant_power_norm else f'data_0152-0157.h5'
+    # filename = f'data_0158_ant_norm.h5' if is_ant_power_norm else f'data_0158.h5'
 
     downsampling_DICHASUS_dataset(raw_dataset_paths, offset_path, assignments_matrix,
                                   save_path, filename,
@@ -238,6 +224,4 @@ if __name__ == '__main__':
                                   downsampling_factor=downsampling_factor,
                                   downsampling_method=downsampling_method,
                                   is_ant_power_norm=is_ant_power_norm)
-
-
 
