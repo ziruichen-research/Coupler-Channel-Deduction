@@ -1,6 +1,6 @@
 # Coupler-Channel-Deduction
 
-Official implementation for Coupler-based wireless channel deduction models (DeepMIMO + DICHASUS), corresponding to the paper:
+Official implementation for Coupler-based wireless channel deduction, corresponding to the paper:
 
 **Full-Domain Interleaved Coupler: A Wireless Native Neural Backbone for Channel Representation and Deduction**  
 Zirui Chen, Ziqing Xing, Zhaoyang Zhang, Hongning Ruan, Yuzhi Yang, Zhaohui Yang, Chongwen Huang, Mérouane Debbah.
