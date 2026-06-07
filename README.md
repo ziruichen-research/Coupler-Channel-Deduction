@@ -2,8 +2,8 @@
 
 Official implementation for Coupler-based wireless channel deduction models (DeepMIMO + DICHASUS), corresponding to the paper:
 
-**Full-Domain Staggered Coupler: A Native-AI Neural Backbone for Wireless Channel Representation and Deduction**  
-Zirui Chen, Ziqing Xing, Zhaoyang Zhang, Hongning Ruan, Zhaohui Yang, Chongwen Huang, Mérouane Debbah.
+**Full-Domain Interleaved Coupler: A Wireless Native Neural Backbone for Channel Representation and Deduction**  
+Zirui Chen, Ziqing Xing, Zhaoyang Zhang, Hongning Ruan, Yuzhi Yang, Zhaohui Yang, Chongwen Huang, Mérouane Debbah.
 
 This project supports channel deduction tasks (estimation/interpolation/prediction-like settings) on both simulation and measured datasets, with multiple model schemes:
 
@@ -359,8 +359,6 @@ Extract with:
 ```bash
 python extract_exp.py --archive-path ./data-exp-zip/exp-pretrained.tar.gz
 ```
-
-By default, archive root `exp/` is restored to local `exp/`.
 
 After extraction, checkpoints in
 `./exp...` can be referenced directly by test scripts.
