@@ -53,8 +53,6 @@ Entry points:
 │   ├── build_neighborhood_dataset.py # Build KNN neighborhood training/testing sets
 │   └── vis_data_distribution.py    # Data distribution visualization
 ├── environment.yml                 # Environment definition (single-file)
-├── CITATION.cff                    # Citation metadata for GitHub
-├── LICENSE                         # Unified license: code, weights, and patent notice
 ├── extract_exp.py                  # Extract pretrained exp archive (supports root remap)
 ├── extract_datasets.py             # Extract tar.gz with root remap (e.g., data -> data-tmp)
 ├── plot_figs_DeepMIMO.ipynb        # Visualization notebook for DeepMIMO test results
@@ -111,7 +109,9 @@ under the same O1 directory.
 
 #### 4.1.2 Using provided tar.gz package
 
-You can distribute `DeepMIMO-O1.tar.gz` via Google Drive (link to be filled by maintainers).
+Download `DeepMIMO-O1.tar.gz` from the Google Drive folder:
+
+https://drive.google.com/drive/folders/1txq8lt7TbZAF9zNReNRpWBAvzefrBs-I?usp=sharing
 
 1. Put archive at:
 
@@ -343,8 +343,12 @@ How to use:
 
 ## 10. Use Pretrained exp
 
-Users can download the pretrained experiment archive (for example,
-`exp-pretrained.tar.gz`) from Google Drive, then place it under:
+Users can download the pretrained experiment archive `exp-pretrained.tar.gz`
+from the Google Drive folder:
+
+https://drive.google.com/drive/folders/1txq8lt7TbZAF9zNReNRpWBAvzefrBs-I?usp=sharing
+
+Then place it under:
 
 ```bash
 ./data-exp-zip/
@@ -357,30 +361,6 @@ python extract_exp.py --archive-path ./data-exp-zip/exp-pretrained.tar.gz
 ```
 
 By default, archive root `exp/` is restored to local `exp/`.
-If you want to extract to another folder name (for example `exp-tmp/`), edit
-`extract_exp.py` and set:
 
-```python
-EXTRACT_ROOT_NAME = "exp-tmp"
-```
-
-Then run the same extraction command. After extraction, checkpoints in
-`./exp...` (or `./exp-tmp...`) can be referenced directly by test scripts.
-
-## 11. Citation
-
-If this repository helps your research, please cite the corresponding Coupler paper.
-
-GitHub citation metadata is provided in `CITATION.cff`. Update repository URL and final publication DOI after paper publication.
-
-## 12. License and Patent
-
-- Source code and model checkpoints/weights are licensed under `PolyForm-Noncommercial-1.0.0`.
-- Intended use is academic/noncommercial research.
-- Patent rights are reserved by the right holder(s); no express or implied patent license is granted.
-- All terms above are consolidated in `LICENSE`.
-
-## 13. Acknowledgement
-
-- DeepMIMO dataset
-- DICHASUS dataset
+After extraction, checkpoints in
+`./exp...` can be referenced directly by test scripts.
