@@ -2,7 +2,7 @@
 
 Official implementation for Coupler-based wireless channel deduction, corresponding to the paper:
 
-**Full-Domain Interleaved Coupler: A Wireless Native Neural Backbone for Channel Representation and Deduction**  
+**Full-Domain Coupler: A Wireless Native Neural Backbone for Channel Representation and Deduction**  
 Zirui Chen, Ziqing Xing, Zhaoyang Zhang, Hongning Ruan, Yuzhi Yang, Zhaohui Yang, Chongwen Huang, Mérouane Debbah.
 
 This repository supports channel deduction tasks on simulation and measured datasets, including estimation/interpolation/prediction-like settings.
@@ -198,3 +198,22 @@ python extract_exp.py --archive-path ./data-exp-zip/exp-pretrained.tar.gz
 ```
 
 After extraction, checkpoints and result files under `exp/...` can be referenced by the test scripts and visualization notebooks.
+
+## 7. Citation
+
+If you use this code, data, or pretrained results in your research, please cite:
+
+Z. Chen, Z. Xing, Z. Zhang, H. Ruan, Y. Yang, Z. Yang, C. Huang, and M. Debbah, "Full-Domain Coupler: A Wireless Native Neural Backbone for Channel Representation and Deduction," arXiv:2606.22038, 2026. [Online]. Available: https://arxiv.org/abs/2606.22038
+
+```bibtex
+@misc{chen2026fulldomaincoupler,
+  title={Full-Domain Coupler: A Wireless Native Neural Backbone for Channel Representation and Deduction},
+  author={Chen, Zirui and Xing, Ziqing and Zhang, Zhaoyang and Ruan, Hongning and Yang, Yuzhi and Yang, Zhaohui and Huang, Chongwen and Debbah, Mérouane},
+  year={2026},
+  eprint={2606.22038},
+  archivePrefix={arXiv},
+  primaryClass={eess.SP},
+  doi={10.48550/arXiv.2606.22038},
+  url={https://arxiv.org/abs/2606.22038}
+}
+```
