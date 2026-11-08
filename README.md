@@ -3,7 +3,7 @@
 Official implementation for Coupler-based wireless channel deduction, corresponding to the paper:
 
 **[Full-Domain Coupler: A Wireless Native Neural Backbone for Channel Representation and Deduction](https://arxiv.org/abs/2606.22038)**  
-Zirui Chen, Ziqing Xing, Zhaoyang Zhang, Hongning Ruan, Yuzhi Yang, Zhaohui Yang, Chongwen Huang, Mérouane Debbah.
+[Zirui Chen](https://ziruichen-research.github.io/), Ziqing Xing, Zhaoyang Zhang, Hongning Ruan, Yuzhi Yang, Zhaohui Yang, Chongwen Huang, Mérouane Debbah.
 
 This repository supports channel deduction tasks on simulation and measured datasets, including estimation/interpolation/prediction-like settings.
 
